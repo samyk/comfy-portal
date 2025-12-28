@@ -65,9 +65,6 @@ export const EditServerModal = forwardRef<
 
   // 表单验证
   const validateName = (value: string) => {
-    if (value.length === 0) {
-      return 'Name is required';
-    }
     if (value.length > MAX_NAME_LENGTH) {
       return `Name must be less than ${MAX_NAME_LENGTH} characters`;
     }
@@ -88,8 +85,11 @@ export const EditServerModal = forwardRef<
       return;
     }
 
+    // Auto-generate name as Host:Port if not provided
+    const finalName = name.trim() || `${host}:${port}`;
+
     updateServer(serverId, {
-      name,
+      name: finalName,
       host,
       port: parseInt(port, 10),
       useSSL,
@@ -141,18 +141,6 @@ export const EditServerModal = forwardRef<
             </View>
 
             <FormInput
-              title="Name"
-              error={nameError}
-              defaultValue={name}
-              onChangeText={(value: string) => {
-                setName(value);
-                setNameError('');
-              }}
-              placeholder="Server name"
-              maxLength={MAX_NAME_LENGTH}
-            />
-
-            <FormInput
               title="Host"
               error={hostError}
               defaultValue={host}
@@ -163,6 +151,18 @@ export const EditServerModal = forwardRef<
               placeholder="Host or IP address"
               autoCapitalize="none"
               autoCorrect={false}
+            />
+
+            <FormInput
+              title="Name (Optional)"
+              error={nameError}
+              defaultValue={name}
+              onChangeText={(value: string) => {
+                setName(value);
+                setNameError('');
+              }}
+              placeholder="Server name"
+              maxLength={MAX_NAME_LENGTH}
             />
 
             <FormInput

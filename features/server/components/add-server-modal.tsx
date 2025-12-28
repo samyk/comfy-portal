@@ -83,9 +83,6 @@ export const AddServerModal = forwardRef<AddServerModalRef, AddServerModalProps>
     };
 
     const validateName = (value: string) => {
-      if (value.length === 0) {
-        return 'Name is required';
-      }
       if (value.length > MAX_NAME_LENGTH) {
         return `Name must be less than ${MAX_NAME_LENGTH} characters`;
       }
@@ -105,8 +102,11 @@ export const AddServerModal = forwardRef<AddServerModalRef, AddServerModalProps>
         return;
       }
 
+      // Auto-generate name as Host:Port if not provided
+      const finalName = name.trim() || `${host}:${port}`;
+
       addServer({
-        name,
+        name: finalName,
         host,
         port: parseInt(port, 10),
         useSSL,
@@ -158,18 +158,6 @@ export const AddServerModal = forwardRef<AddServerModalRef, AddServerModalProps>
               </View>
 
               <FormInput
-                title="Name"
-                error={nameError}
-                defaultValue={name}
-                onChangeText={(value: string) => {
-                  setName(value);
-                  setNameError('');
-                }}
-                placeholder="Server name"
-                maxLength={MAX_NAME_LENGTH}
-              />
-
-              <FormInput
                 title="Host"
                 error={hostError}
                 defaultValue={host}
@@ -180,6 +168,18 @@ export const AddServerModal = forwardRef<AddServerModalRef, AddServerModalProps>
                 placeholder="Host or IP address"
                 autoCapitalize="none"
                 autoCorrect={false}
+              />
+
+              <FormInput
+                title="Name (Optional)"
+                error={nameError}
+                defaultValue={name}
+                onChangeText={(value: string) => {
+                  setName(value);
+                  setNameError('');
+                }}
+                placeholder="Server name"
+                maxLength={MAX_NAME_LENGTH}
               />
 
               <FormInput
