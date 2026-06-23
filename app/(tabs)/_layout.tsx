@@ -14,14 +14,16 @@ export default function TabLayout() {
   const getActiveTabFromPathname = (): TabRoute => {
     if (pathname === '/setting' || pathname.startsWith('/setting')) return 'setting';
     if (pathname === '/explore' || pathname.startsWith('/explore')) return 'explore';
+    if (pathname === '/generate' || pathname.startsWith('/generate')) return 'generate';
     return 'server';
   };
 
   const getActiveTabNameByRoute = (routeName: string): TabRoute => {
+    if (routeName === 'generate') return 'generate';
     if (routeName === 'index') return 'server';
     if (routeName === 'explore') return 'explore';
     if (routeName === 'setting') return 'setting';
-    return 'server';
+    return 'generate';
   };
 
   const handleSidebarTabChange = (tab: TabRoute) => {
@@ -31,6 +33,7 @@ export default function TabLayout() {
 
   const tabs = (
     <Tabs
+      initialRouteName="generate"
       screenOptions={{ headerShown: false }}
       tabBar={(props) => {
         if (isTabletWidth) return null;
@@ -49,6 +52,7 @@ export default function TabLayout() {
         );
       }}
     >
+      <Tabs.Screen name="generate" options={{ title: 'Generate' }} />
       <Tabs.Screen name="index" options={{ title: 'Servers' }} />
       <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
       <Tabs.Screen name="setting" options={{ title: 'Settings' }} />

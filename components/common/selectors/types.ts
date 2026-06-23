@@ -4,6 +4,7 @@ export interface SelectorOption {
   description?: string;
   image?: string;
   serverName?: string;
+  status?: string;
 }
 
 export interface SearchableBottomSheetProps {

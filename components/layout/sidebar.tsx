@@ -1,5 +1,5 @@
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { Server, Settings2 } from 'lucide-react-native';
+import { Compass, Server, Settings2, Wand2 } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import React from 'react';
 import { useWindowDimensions } from 'react-native';
@@ -70,10 +70,24 @@ export const Sidebar = ({ activeTab, onChangeTab }: SidebarProps) => {
       {/* Navigation items */}
       <VStack space="xs" className="px-3 pt-4">
         <SidebarItem
+          icon={Wand2}
+          label="Generate"
+          isActive={activeTab === 'generate'}
+          onPress={() => onChangeTab('generate')}
+          colors={colors}
+        />
+        <SidebarItem
           icon={Server}
           label="Servers"
           isActive={activeTab === 'server'}
           onPress={() => onChangeTab('server')}
+          colors={colors}
+        />
+        <SidebarItem
+          icon={Compass}
+          label="Explore"
+          isActive={activeTab === 'explore'}
+          onPress={() => onChangeTab('explore')}
           colors={colors}
         />
         <SidebarItem
