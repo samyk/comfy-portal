@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDebouncedCallback } from 'use-debounce';
 
@@ -8,6 +8,7 @@ import { useWorkflowStore } from '@/features/workflow/stores/workflow-store';
 import { Node } from '@/features/workflow/types';
 import { ComfyClient, QueueResponse } from '@/services/comfy-client';
 import { saveGeneratedMedia } from '@/services/image-storage';
+import { notifyGenerationComplete } from '@/utils/notifications';
 import { showToast } from '@/utils/toast';
 
 interface GenerationState {
@@ -28,9 +29,15 @@ interface GenerationContextType {
   state: GenerationState;
   generatedMedia: string[];
   isGenerating: boolean;
-  generate: (workflow: Record<string, Node>, workflowId: string, serverId: string) => Promise<void>;
+  generate: (
+    workflow: Record<string, Node>,
+    workflowId: string,
+    serverId: string,
+    options?: { prompt?: string },
+  ) => Promise<void>;
   reset: () => void;
   cancel: () => Promise<void>;
+  stopGenerating: () => Promise<void>;
   getQueue: () => Promise<QueueResponse>;
   deleteQueueItems: (promptIds: string[]) => Promise<void>;
   clearQueue: () => Promise<void>;
@@ -72,11 +79,21 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
   });
 
   const comfyClient = useRef<ComfyClient | null>(null);
-  const progressCompleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const progressCompleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nodeHooksRef = useRef<Record<string, NodeLifecycleHooks>>({});
   const insets = useSafeAreaInsets();
+  const appStateRef = useRef(AppState.currentState);
 
   const lastProgressPercentRef = useRef(0);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      appStateRef.current = nextState;
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   // Debounce progress updates to avoid excessive re-renders
   const debouncedSetProgress = useDebouncedCallback(
@@ -173,7 +190,12 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const generate = useCallback(
-    async (workflow: Record<string, Node>, workflowId: string, serverId: string) => {
+    async (
+      workflow: Record<string, Node>,
+      workflowId: string,
+      serverId: string,
+      options?: { prompt?: string },
+    ) => {
       const server = useServersStore.getState().servers.find((s) => s.id === serverId);
       if (!server) {
         showToast.error('Error', 'Server not found', insets.top + 8);
@@ -207,9 +229,33 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
         );
 
         // onPre hooks may update node inputs in the workflow store (e.g. random seeds).
-        // Re-read the latest workflow snapshot so this generation run uses those updates.
+        // Keep the caller's workflow (e.g. Generate page prompt overrides) and only
+        // overlay store updates for nodes that registered onPre hooks.
+        const storedWorkflow = useWorkflowStore
+          .getState()
+          .workflow.find((p) => p.id === workflowId)?.data;
+        const hookNodeIds = Object.keys(nodeHooksRef.current);
         const workflowForExecution =
-          useWorkflowStore.getState().workflow.find((p) => p.id === workflowId)?.data ?? workflow;
+          storedWorkflow && hookNodeIds.length > 0
+            ? (Object.fromEntries(
+                Object.entries(workflow).map(([nodeId, node]) => {
+                  const storedNode = storedWorkflow[nodeId];
+                  if (!hookNodeIds.includes(nodeId) || !storedNode) {
+                    return [nodeId, node];
+                  }
+                  return [
+                    nodeId,
+                    {
+                      ...node,
+                      inputs: {
+                        ...(node.inputs || {}),
+                        ...(storedNode.inputs || {}),
+                      },
+                    },
+                  ];
+                }),
+              ) as Record<string, Node>)
+            : workflow;
 
         if (!comfyClient.current.isConnected()) {
           try {
@@ -259,6 +305,7 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
                     mediaUrl,
                     workflow: workflowForExecution,
                     workflowId,
+                    prompt: options?.prompt,
                   });
 
                   if (result) {
@@ -272,6 +319,15 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
 
                 if (savedMediaPaths.length > 0) {
                   setGeneratedMedia(savedMediaPaths);
+                  if (appStateRef.current !== 'active') {
+                    const workflowName = useWorkflowStore
+                      .getState()
+                      .workflow.find((item) => item.id === workflowId)?.name;
+                    await notifyGenerationComplete(
+                      'Generation complete',
+                      workflowName ? `Workflow: ${workflowName}` : undefined,
+                    );
+                  }
                 } else {
                   console.error('Failed to save generated media');
                   showToast.error('Save Failed', 'Unable to save the generated media.', insets.top + 8);
@@ -314,11 +370,14 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
     [handleNodeProgress, handleProgress, insets.top, reset, debouncedSetProgress, progress.progress.max, setGeneratedMedia],
   );
 
+  const stopGenerating = cancel;
+
   const actions = React.useMemo(
     () => ({
       generate,
       reset,
       cancel,
+      stopGenerating,
       getQueue,
       deleteQueueItems,
       clearQueue,
@@ -326,7 +385,7 @@ export function GenerationProvider({ children }: { children: React.ReactNode }) 
       registerNodeHooks,
       unregisterNodeHooks,
     }),
-    [generate, reset, cancel, getQueue, deleteQueueItems, clearQueue, registerNodeHooks, unregisterNodeHooks, setGeneratedMedia],
+    [generate, reset, cancel, stopGenerating, getQueue, deleteQueueItems, clearQueue, registerNodeHooks, unregisterNodeHooks, setGeneratedMedia],
   );
 
   return (

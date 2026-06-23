@@ -7,6 +7,7 @@ interface SaveMediaOptions {
   workflowId: string;
   mediaUrl: string;
   workflow: Workflow;
+  prompt?: string;
   delete?: boolean;
 }
 
@@ -27,6 +28,7 @@ export async function saveGeneratedMedia({
   workflowId,
   mediaUrl,
   workflow,
+  prompt,
   delete: shouldDelete,
 }: SaveMediaOptions) {
   try {
@@ -67,6 +69,7 @@ export async function saveGeneratedMedia({
       timestamp,
       workflow,
       originalUrl: mediaUrl,
+      ...(prompt ? { prompt } : {}),
     };
 
     metadataFile.write(JSON.stringify(metadata, null, 2), { encoding: 'utf8' });
@@ -131,6 +134,68 @@ export async function loadHistoryMedia(serverId: string, workflowId: string) {
       .sort((a, b) => b.timestamp - a.timestamp);
   } catch (error) {
     console.error('failed to load history media:', error);
+    return [];
+  }
+}
+
+export async function loadHistoryMediaWithPrompt(serverId: string, workflowId: string) {
+  try {
+    const mediaItems = await getGeneratedMedia(serverId, workflowId);
+
+    return mediaItems
+      .filter((item) => item.metadata)
+      .map((item) => ({
+        url: item.path,
+        prompt: item.metadata.prompt as string | undefined,
+        timestamp: new Date(item.metadata.timestamp).getTime(),
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error('failed to load history media with prompt:', error);
+    return [];
+  }
+}
+
+export async function loadAllHistoryMediaWithPrompt() {
+  try {
+    const serverDir = new Directory(Paths.document, 'server');
+    const serverInfo = Paths.info(serverDir.uri);
+    if (!serverInfo.exists || serverInfo.isDirectory === false) {
+      return [];
+    }
+
+    const allItems: {
+      url: string;
+      prompt?: string;
+      timestamp: number;
+      serverId: string;
+      workflowId: string;
+    }[] = [];
+
+    for (const entry of serverDir.list()) {
+      if (!(entry instanceof Directory)) continue;
+      const serverId = entry.name;
+      const workflowsDir = new Directory(Paths.document, 'server', serverId, 'workflows');
+      const workflowsInfo = Paths.info(workflowsDir.uri);
+      if (!workflowsInfo.exists || workflowsInfo.isDirectory === false) continue;
+
+      for (const workflowEntry of workflowsDir.list()) {
+        if (!(workflowEntry instanceof Directory)) continue;
+        const workflowId = workflowEntry.name;
+        const items = await loadHistoryMediaWithPrompt(serverId, workflowId);
+        allItems.push(
+          ...items.map((item) => ({
+            ...item,
+            serverId,
+            workflowId,
+          })),
+        );
+      }
+    }
+
+    return allItems.sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error('failed to load all history media with prompt:', error);
     return [];
   }
 }

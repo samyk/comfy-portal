@@ -31,7 +31,8 @@
       },
       "package": "com.sillyl12324.comfyportal",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -85,6 +86,13 @@
       "expo-video",
       "expo-font",
       "expo-image",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#ffffff"
+        }
+      ],
       [
         "expo-sharing",
         {

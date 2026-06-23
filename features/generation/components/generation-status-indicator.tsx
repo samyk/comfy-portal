@@ -1,6 +1,6 @@
 import { Box } from '@/components/ui/box';
+import { HStack } from '@/components/ui/hstack';
 import { Text } from '@/components/ui/text';
-import { VStack } from '@/components/ui/vstack';
 
 /**
  * Props for the ServerStatus component
@@ -18,7 +18,7 @@ interface ServerStatusProps {
     max: number;
   };
   /** Server name to display */
-  name: string;
+  name?: string;
 }
 
 /**
@@ -52,10 +52,10 @@ export function ServerStatus({
   }
 
   return (
-    <VStack space="sm" className="items-center">
-      <Text className="text-xs text-primary-300">{name}</Text>
+    <HStack space="sm" className="items-center">
+      {name ? <Text className="text-xs text-primary-300">{name}</Text> : null}
       <Box className={`rounded-full bg-${color}-100 dark:bg-${color}-900/30 p-0.2`}>
-        <Box className={`flex-row items-center rounded-full px-2 py-0.5`}>
+        <Box className="flex-row items-center rounded-full px-2 py-0.5">
           <Box className={`mr-1 h-1.5 w-1.5 rounded-full bg-${color}-500`}>
             {(generating || downloading) && (
               <Box className={`absolute h-1.5 w-1.5 rounded-full bg-${color}-500`} />
@@ -64,6 +64,6 @@ export function ServerStatus({
           <Text className={`text-2xs font-medium text-${color}-700 dark:text-${color}-300`}>{status}</Text>
         </Box>
       </Box>
-    </VStack>
+    </HStack>
   );
 }

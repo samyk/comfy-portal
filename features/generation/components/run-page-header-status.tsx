@@ -2,7 +2,7 @@ import { useGenerationProgress, useGenerationStatus } from '@/features/generatio
 import { ServerStatus } from './generation-status-indicator';
 
 interface RunPageHeaderStatusProps {
-  serverName: string;
+  serverName?: string;
 }
 
 export function RunPageHeaderStatus({ serverName }: RunPageHeaderStatusProps) {
