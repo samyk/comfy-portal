@@ -9,21 +9,25 @@ import { View } from '@/components/ui/view';
 import { VStack } from '@/components/ui/vstack';
 import { RunPageHeaderStatus } from '@/features/generation/components/run-page-header-status';
 import { ZoomableMedia } from '@/features/generation/components/media-preview/zoomable-media';
-import { GenerationProvider, useGenerationActions, useGenerationStatus } from '@/features/generation/context/generation-context';
+import {
+  GenerationProvider,
+  useGenerationActions,
+  useGenerationStatus,
+} from '@/features/generation/context/generation-context';
 import { useGenerateSetupStore } from '@/features/generation/stores/generate-setup-store';
 import { useServersStore } from '@/features/server/stores/server-store';
 import { useWorkflowStore } from '@/features/workflow/stores/workflow-store';
-import { loadAllHistoryMediaWithPrompt } from '@/services/image-storage';
+import { copyImageAsSticker, copyImageToClipboard, loadAllHistoryMediaWithPrompt } from '@/services/image-storage';
 import { showToast } from '@/utils/toast';
 import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import { File } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
-import * as Clipboard from 'expo-clipboard';
-import { ChevronDown, MoreHorizontal, PlayCircle, Save, Share2, Copy, Wand2 } from 'lucide-react-native';
+import { ChevronDown, MoreHorizontal, PlayCircle, Save, Share2, Copy, Wand2, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Keyboard, Platform, Pressable, TextInput, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -68,22 +72,19 @@ function GenerateScreenContent() {
   const workflows = useWorkflowStore((state) => state.workflow);
 
   const isCompleteSetup = useCallback(
-    (setup?: typeof setups[number]) =>
+    (setup?: (typeof setups)[number]) =>
       Boolean(
         setup?.serverId &&
-          setup?.workflowId &&
-          (setup?.promptNodes?.length ?? 0) > 0 &&
-          setup?.promptNodes?.some((node) => node.inputKeys.length > 0),
+        setup?.workflowId &&
+        (setup?.promptNodes?.length ?? 0) > 0 &&
+        setup?.promptNodes?.some((node) => node.inputKeys.length > 0),
       ),
     [],
   );
 
   const completeSetups = useMemo(() => setups.filter((setup) => isCompleteSetup(setup)), [setups, isCompleteSetup]);
   const visibleSetups = useMemo(() => setups.filter((setup) => !setup.isDraft), [setups]);
-  const selectedSetup = useMemo(
-    () => setups.find((setup) => setup.id === selectedSetupId),
-    [setups, selectedSetupId],
-  );
+  const selectedSetup = useMemo(() => setups.find((setup) => setup.id === selectedSetupId), [setups, selectedSetupId]);
   const activeSetup = useMemo(
     () => (isCompleteSetup(selectedSetup) ? selectedSetup : completeSetups[0]),
     [selectedSetup, completeSetups, isCompleteSetup],
@@ -93,10 +94,7 @@ function GenerateScreenContent() {
   const promptNodes = activeSetup?.promptNodes ?? [];
 
   const server = useMemo(() => servers.find((s) => s.id === serverId), [servers, serverId]);
-  const workflowRecord = useMemo(
-    () => workflows.find((wf) => wf.id === workflowId),
-    [workflows, workflowId],
-  );
+  const workflowRecord = useMemo(() => workflows.find((wf) => wf.id === workflowId), [workflows, workflowId]);
   const [prompt, setPrompt] = useState('');
   const basePromptHeight = 44;
   const [promptHeight, setPromptHeight] = useState(basePromptHeight);
@@ -120,37 +118,36 @@ function GenerateScreenContent() {
   const ADD_SETUP_VALUE = '__add_setup__';
 
   const setupOptions = useMemo(
-    () =>
-      [
-        {
-          value: ADD_SETUP_VALUE,
-          label: 'Add Setup',
-          description: 'Create a new setup',
-          serverName: 'add-setup',
-        },
-        ...visibleSetups.map((setup) => {
-          const setupServer = servers.find((s) => s.id === setup.serverId);
-          const setupWorkflow = workflows.find((wf) => wf.id === setup.workflowId);
-          const serverName = setupServer?.name ?? 'No server';
-          const workflowName = setupWorkflow?.name ?? 'No workflow';
-          const statusLabel = setupServer?.status ? setupServer.status : 'offline';
-          const nodeDetails = (setup.promptNodes ?? [])
-            .map((node) => {
-              const nodeMeta = setupWorkflow?.data?.[node.nodeId];
-              const nodeLabel = nodeMeta?._meta?.title || nodeMeta?.class_type || node.nodeId;
-              const keys = node.inputKeys.length > 0 ? node.inputKeys.join(', ') : 'No keys';
-              return `${nodeLabel}: ${keys}`;
-            })
-            .join(' • ');
-          const descriptionBase = `${serverName} • ${workflowName}`;
-          return {
-            value: setup.id,
-            label: setup.name || 'Untitled Setup',
-            description: nodeDetails ? `${descriptionBase} • ${nodeDetails}` : descriptionBase,
-            status: statusLabel,
-          };
-        }),
-      ],
+    () => [
+      {
+        value: ADD_SETUP_VALUE,
+        label: 'Add Setup',
+        description: 'Create a new setup',
+        serverName: 'add-setup',
+      },
+      ...visibleSetups.map((setup) => {
+        const setupServer = servers.find((s) => s.id === setup.serverId);
+        const setupWorkflow = workflows.find((wf) => wf.id === setup.workflowId);
+        const serverName = setupServer?.name ?? 'No server';
+        const workflowName = setupWorkflow?.name ?? 'No workflow';
+        const statusLabel = setupServer?.status ? setupServer.status : 'offline';
+        const nodeDetails = (setup.promptNodes ?? [])
+          .map((node) => {
+            const nodeMeta = setupWorkflow?.data?.[node.nodeId];
+            const nodeLabel = nodeMeta?._meta?.title || nodeMeta?.class_type || node.nodeId;
+            const keys = node.inputKeys.length > 0 ? node.inputKeys.join(', ') : 'No keys';
+            return `${nodeLabel}: ${keys}`;
+          })
+          .join(' • ');
+        const descriptionBase = `${serverName} • ${workflowName}`;
+        return {
+          value: setup.id,
+          label: setup.name || 'Untitled Setup',
+          description: nodeDetails ? `${descriptionBase} • ${nodeDetails}` : descriptionBase,
+          status: statusLabel,
+        };
+      }),
+    ],
     [visibleSetups, servers, workflows],
   );
 
@@ -284,15 +281,13 @@ function GenerateScreenContent() {
         className="active:opacity-80"
       >
         <RNView
-          className={`mx-4 mb-2 overflow-hidden rounded-xl ${isSelected ? 'border-0 bg-background-200' : 'bg-background-50'}`}
+          className={`mx-4 mb-2 rounded-xl overflow-hidden ${isSelected ? 'bg-background-200 border-0' : 'bg-background-50'}`}
         >
           <VStack space="xs" className="p-3">
             <Text className={`text-base ${isSelected ? 'font-medium text-typography-950' : 'text-typography-500'}`}>
               {option.label}
             </Text>
-            {option.description && (
-              <Text className="text-xs text-background-400">{option.description}</Text>
-            )}
+            {option.description && <Text className="text-xs text-background-400">{option.description}</Text>}
           </VStack>
         </RNView>
       </Pressable>
@@ -301,23 +296,12 @@ function GenerateScreenContent() {
   );
 
   const renderSetupItem = useCallback(
-    (
-      option: { value: string; label: string; description?: string; status?: string },
-      isSelected: boolean,
-    ) => {
+    (option: { value: string; label: string; description?: string; status?: string }, isSelected: boolean) => {
       const status = option.status ?? 'offline';
       const statusContainerStyles =
-        status === 'online'
-          ? 'bg-success-500/15'
-          : status === 'refreshing'
-            ? 'bg-warning-500/15'
-            : 'bg-error-500/15';
+        status === 'online' ? 'bg-success-500/15' : status === 'refreshing' ? 'bg-warning-500/15' : 'bg-error-500/15';
       const statusTextStyles =
-        status === 'online'
-          ? 'text-success-600'
-          : status === 'refreshing'
-            ? 'text-warning-600'
-            : 'text-error-600';
+        status === 'online' ? 'text-success-600' : status === 'refreshing' ? 'text-warning-600' : 'text-error-600';
       const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
       return (
         <Pressable
@@ -333,41 +317,41 @@ function GenerateScreenContent() {
           }}
           className="active:opacity-80"
         >
-        <RNView
-          className={`mx-4 mb-2 overflow-hidden rounded-xl ${isSelected ? 'border-0 bg-background-200' : 'bg-background-50'}`}
-        >
-          <VStack space="xs" className="p-3">
-            <HStack className="items-center justify-between">
-              <HStack space="xs" className="items-center flex-1">
-                <Text className={`text-base ${isSelected ? 'font-medium text-typography-950' : 'text-typography-500'}`}>
-                  {option.label}
-                </Text>
+          <RNView
+            className={`mx-4 mb-2 rounded-xl overflow-hidden ${isSelected ? 'bg-background-200 border-0' : 'bg-background-50'}`}
+          >
+            <VStack space="xs" className="p-3">
+              <HStack className="items-center justify-between">
+                <HStack space="xs" className="flex-1 items-center">
+                  <Text
+                    className={`text-base ${isSelected ? 'font-medium text-typography-950' : 'text-typography-500'}`}
+                  >
+                    {option.label}
+                  </Text>
+                  {option.value !== ADD_SETUP_VALUE && (
+                    <RNView className={`px-2 py-0.5 rounded-full ${statusContainerStyles}`}>
+                      <Text className={`font-semibold text-[10px] ${statusTextStyles}`}>{statusLabel}</Text>
+                    </RNView>
+                  )}
+                </HStack>
                 {option.value !== ADD_SETUP_VALUE && (
-                  <RNView className={`rounded-full px-2 py-0.5 ${statusContainerStyles}`}>
-                    <Text className={`text-[10px] font-semibold ${statusTextStyles}`}>{statusLabel}</Text>
-                  </RNView>
+                  <Button
+                    variant="link"
+                    className="h-8 px-2"
+                    onPress={(event: any) => {
+                      event?.stopPropagation?.();
+                      setIsSetupOpen(false);
+                      router.push({ pathname: '/generate/setup' as never, params: { editId: option.value } });
+                    }}
+                  >
+                    <ButtonText className="text-xs text-primary-500">Edit</ButtonText>
+                  </Button>
                 )}
               </HStack>
-              {option.value !== ADD_SETUP_VALUE && (
-                <Button
-                  variant="link"
-                  className="h-8 px-2"
-                  onPress={(event: any) => {
-                    event?.stopPropagation?.();
-                    setIsSetupOpen(false);
-                    router.push({ pathname: '/generate/setup' as never, params: { editId: option.value } });
-                  }}
-                >
-                  <ButtonText className="text-xs text-primary-500">Edit</ButtonText>
-                </Button>
-              )}
-            </HStack>
-            {option.description && (
-              <Text className="text-xs text-background-400">{option.description}</Text>
-            )}
-          </VStack>
-        </RNView>
-      </Pressable>
+              {option.description && <Text className="text-xs text-background-400">{option.description}</Text>}
+            </VStack>
+          </RNView>
+        </Pressable>
       );
     },
     [createSetup, router, selectSetup],
@@ -379,6 +363,10 @@ function GenerateScreenContent() {
   }, []);
 
   const activeHistoryItem = history[activeHistoryIndex];
+  const isActiveHistoryImage = Boolean(
+    activeHistoryItem?.url &&
+    !['mp4', 'mov', 'm4v', 'webm'].includes(activeHistoryItem.url.split('.').pop()?.toLowerCase() || ''),
+  );
 
   const handleSaveHistoryItem = useCallback(async () => {
     if (!activeHistoryItem?.url) return;
@@ -416,7 +404,7 @@ function GenerateScreenContent() {
   const handleCopyHistoryImage = useCallback(async () => {
     if (!activeHistoryItem?.url) return;
     try {
-      await Clipboard.setImageAsync(activeHistoryItem.url);
+      await copyImageToClipboard(activeHistoryItem.url);
       showToast.success('Image copied', undefined, insets.top + 8);
       setShowHistoryActions(false);
     } catch (error) {
@@ -424,6 +412,37 @@ function GenerateScreenContent() {
       showToast.error('Copy Failed', 'Unable to copy the image.', insets.top + 8);
     }
   }, [activeHistoryItem, insets.top]);
+
+  const handleCopyHistoryImageItem = useCallback(
+    async (url: string) => {
+      try {
+        await copyImageToClipboard(url);
+        showToast.success('Image copied', undefined, insets.top + 8);
+      } catch (error) {
+        console.error('Failed to copy image:', error);
+        showToast.error('Copy Failed', 'Unable to copy the image.', insets.top + 8);
+      }
+    },
+    [insets.top],
+  );
+
+  const handleCopyHistoryStickerItem = useCallback(
+    async (url: string) => {
+      if (Platform.OS !== 'ios') {
+        showToast.error('iOS only', 'Stickers are only available on iOS.', insets.top + 8);
+        return;
+      }
+
+      try {
+        await copyImageAsSticker(url);
+        showToast.success('Sticker copied', 'Paste it in Messages to send as a sticker.', insets.top + 8);
+      } catch (error) {
+        console.error('Failed to create sticker:', error);
+        showToast.error('Sticker Failed', 'Unable to create a sticker from this image.', insets.top + 8);
+      }
+    },
+    [insets.top],
+  );
 
   const handleCopyHistoryPrompt = useCallback(async () => {
     if (!activeHistoryItem?.prompt) {
@@ -496,7 +515,7 @@ function GenerateScreenContent() {
   }, [pendingDelete]);
 
   return (
-    <View className="flex-1 bg-background-0">
+    <View className="bg-background-0 flex-1">
       <AppBar
         title="Generate"
         titleSize="xl"
@@ -513,14 +532,10 @@ function GenerateScreenContent() {
         }
       />
 
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ paddingBottom: 24 }}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <VStack space="sm" className="px-5 pb-4 pt-0">
           <VStack space="xs">
-            <View className="relative rounded-xl border border-outline-50 bg-background-50 px-4 py-3">
+            <View className="rounded-xl border-outline-50 bg-background-50 px-4 py-3 relative border">
               <TextInput
                 value={prompt}
                 onChangeText={(value) => {
@@ -540,10 +555,7 @@ function GenerateScreenContent() {
                   textAlignVertical: 'top',
                 }}
                 onContentSizeChange={(event) => {
-                  const nextHeight = Math.max(
-                    basePromptHeight,
-                    Math.ceil(event.nativeEvent.contentSize.height),
-                  );
+                  const nextHeight = Math.max(basePromptHeight, Math.ceil(event.nativeEvent.contentSize.height));
                   if (nextHeight !== promptHeight) {
                     setPromptHeight(nextHeight);
                   }
@@ -558,7 +570,7 @@ function GenerateScreenContent() {
                   }
                   setIsPromptHistoryOpen(true);
                 }}
-                className="absolute right-3 top-3 h-6 w-6 items-center justify-center"
+                className="right-3 top-3 h-6 w-6 absolute items-center justify-center"
               >
                 <Icon as={ChevronDown} size="xs" className="text-typography-500" />
               </Pressable>
@@ -575,7 +587,7 @@ function GenerateScreenContent() {
                 handleGenerate();
               }}
               disabled={status === 'generating' || status === 'downloading' || !isSetupComplete}
-              className="flex-1 rounded-lg active:bg-primary-600 disabled:opacity-50"
+              className="rounded-lg active:bg-primary-600 flex-1 disabled:opacity-50"
             >
               <ButtonIcon as={Wand2} size="sm" />
               <ButtonText className="text-md font-semibold">
@@ -600,7 +612,7 @@ function GenerateScreenContent() {
                 ]);
               }}
               disabled={status !== 'generating'}
-              className="w-28 rounded-lg border border-error-500 bg-transparent disabled:opacity-40"
+              className="w-28 rounded-lg border-error-500 border bg-transparent disabled:opacity-40"
             >
               <ButtonText className="text-md font-semibold text-error-500">Stop</ButtonText>
             </Button>
@@ -623,7 +635,7 @@ function GenerateScreenContent() {
                   const card = (
                     <VStack space="sm" className="w-full">
                       <Pressable
-                        className="w-full overflow-hidden bg-background-100"
+                        className="bg-background-100 w-full overflow-hidden"
                         onPress={() => openHistoryPreview(itemIndex)}
                       >
                         {isVideo ? (
@@ -631,28 +643,52 @@ function GenerateScreenContent() {
                             <Icon as={PlayCircle} size="xl" className="text-typography-300" />
                           </View>
                         ) : (
-                          <Image
-                            source={item.url}
-                            style={{ width: '100%', aspectRatio: aspectRatio || 1 }}
-                            contentFit="contain"
-                            cachePolicy="memory-disk"
-                            onLoad={(event) => {
-                              const { width, height } = event.source;
-                              if (width && height) {
-                                setAspectRatios((prev) => ({
-                                  ...prev,
-                                  [item.url]: width / height,
-                                }));
-                              }
-                            }}
-                          />
+                          <View>
+                            <Image
+                              source={item.url}
+                              style={{ width: '100%', aspectRatio: aspectRatio || 1 }}
+                              contentFit="contain"
+                              cachePolicy="memory-disk"
+                              onLoad={(event) => {
+                                const { width, height } = event.source;
+                                if (width && height) {
+                                  setAspectRatios((prev) => ({
+                                    ...prev,
+                                    [item.url]: width / height,
+                                  }));
+                                }
+                              }}
+                            />
+                            <View className="right-3 bottom-3 gap-2 absolute flex-row">
+                              {Platform.OS === 'ios' && (
+                                <Pressable
+                                  accessibilityLabel="Copy image subject as sticker"
+                                  onPress={(event) => {
+                                    event.stopPropagation?.();
+                                    handleCopyHistoryStickerItem(item.url);
+                                  }}
+                                  className="h-10 w-10 bg-black/55 items-center justify-center rounded-full"
+                                >
+                                  <Icon as={Wand2} size="sm" className="text-white" />
+                                </Pressable>
+                              )}
+                              <Pressable
+                                accessibilityLabel="Copy entire image"
+                                onPress={(event) => {
+                                  event.stopPropagation?.();
+                                  handleCopyHistoryImageItem(item.url);
+                                }}
+                                className="h-10 w-10 bg-black/55 items-center justify-center rounded-full"
+                              >
+                                <Icon as={Copy} size="sm" className="text-white" />
+                              </Pressable>
+                            </View>
+                          </View>
                         )}
                       </Pressable>
                       <VStack space="xs">
                         <Text className="text-sm text-typography-900">{item.prompt || 'Prompt not saved.'}</Text>
-                        <Text className="text-xs text-typography-400">
-                          {formatTimestamp(item.timestamp)}
-                        </Text>
+                        <Text className="text-xs text-typography-400">{formatTimestamp(item.timestamp)}</Text>
                       </VStack>
                     </VStack>
                   );
@@ -675,7 +711,7 @@ function GenerateScreenContent() {
                       renderRightActions={() => (
                         <RNView className="w-36 items-end justify-center">
                           <Pressable
-                            className="h-full w-36 items-center justify-center bg-error-500"
+                            className="w-36 bg-error-500 h-full items-center justify-center"
                             onPress={() => handleDeleteHistoryItem(item.url)}
                           >
                             <Text className="text-sm font-semibold text-white">Delete</Text>
@@ -691,8 +727,8 @@ function GenerateScreenContent() {
             )}
           </VStack>
 
-          <VStack space="xs" className="rounded-xl border border-outline-50 bg-background-50 px-4 py-3">
-            <Text className="text-xs uppercase tracking-widest text-typography-400">Active Setup</Text>
+          <VStack space="xs" className="rounded-xl border-outline-50 bg-background-50 px-4 py-3 border">
+            <Text className="text-xs tracking-widest text-typography-400 uppercase">Active Setup</Text>
             {isSetupComplete ? (
               <VStack space="xs">
                 <Text className="text-sm text-typography-900">Server: {server?.name}</Text>
@@ -701,26 +737,29 @@ function GenerateScreenContent() {
                   Prompt Nodes:{' '}
                   {promptNodes.length > 0
                     ? promptNodes
-                      .map((node) => {
-                        const nodeMeta = workflowRecord?.data?.[node.nodeId];
-                        return nodeMeta?._meta?.title || nodeMeta?.class_type || node.nodeId;
-                      })
-                      .join(', ')
+                        .map((node) => {
+                          const nodeMeta = workflowRecord?.data?.[node.nodeId];
+                          return nodeMeta?._meta?.title || nodeMeta?.class_type || node.nodeId;
+                        })
+                        .join(', ')
                     : 'None'}
                 </Text>
                 <Text className="text-sm text-typography-700">
                   Input Keys:{' '}
                   {promptNodes.length > 0
-                    ? promptNodes
-                      .map((node) => `${node.nodeId}: ${node.inputKeys.join(', ') || 'None'}`)
-                      .join(' • ')
+                    ? promptNodes.map((node) => `${node.nodeId}: ${node.inputKeys.join(', ') || 'None'}`).join(' • ')
                     : 'None'}
                 </Text>
               </VStack>
             ) : (
               <VStack space="xs">
                 <Text className="text-sm text-typography-500">No setup selected yet.</Text>
-                <Button variant="outline" action="secondary" size="sm" onPress={() => router.push('/generate/setup' as never)}>
+                <Button
+                  variant="outline"
+                  action="secondary"
+                  size="sm"
+                  onPress={() => router.push('/generate/setup' as never)}
+                >
                   <ButtonText>Configure Generate Setup</ButtonText>
                 </Button>
               </VStack>
@@ -745,8 +784,8 @@ function GenerateScreenContent() {
       />
 
       {pendingDelete && (
-        <RNView className="absolute bottom-4 left-0 right-0 px-5">
-          <RNView className="flex-row items-center justify-between rounded-xl border border-outline-50 bg-background-0 px-4 py-3 shadow-sm">
+        <RNView className="bottom-4 left-0 right-0 px-5 absolute">
+          <RNView className="rounded-xl border-outline-50 bg-background-0 px-4 py-3 shadow-sm flex-row items-center justify-between border">
             <Text className="text-sm text-typography-900">Item deleted</Text>
             <Pressable onPress={handleUndoDelete} className="px-2 py-1">
               <Text className="text-sm font-medium text-primary-500">Undo</Text>
@@ -784,12 +823,12 @@ function GenerateScreenContent() {
       >
         <ModalBackdrop />
         <ModalContent
-          className="m-0 h-full rounded-none border-0 bg-black p-0"
+          className="m-0 bg-black p-0 h-full rounded-none border-0"
           style={{ shadowColor: 'transparent', elevation: 0 }}
           transition={{ type: 'timing', duration: 250 }}
         >
           <ModalBody
-            className="h-full flex-1 p-0"
+            className="p-0 h-full flex-1"
             contentContainerStyle={{
               flex: 1,
               alignItems: 'center',
@@ -819,15 +858,15 @@ function GenerateScreenContent() {
 
             <Pressable
               onPress={() => setIsHistoryPreviewOpen(false)}
-              className="absolute left-3 top-3 h-9 w-9 items-center justify-center rounded-lg bg-black/40"
+              className="left-3 top-3 h-9 w-9 rounded-lg bg-black/40 absolute items-center justify-center"
               style={{ marginTop: insets.top }}
             >
-              <Icon as={ChevronDown} size="sm" className="text-white rotate-90" />
+              <Icon as={X} size="sm" className="text-white" />
             </Pressable>
 
             <Pressable
               onPress={() => setShowHistoryActions(true)}
-              className="absolute right-3 top-3 h-9 w-9 items-center justify-center rounded-lg bg-black/40"
+              className="right-3 top-3 h-9 w-9 rounded-lg bg-black/40 absolute items-center justify-center"
               style={{ marginTop: insets.top }}
             >
               <Icon as={MoreHorizontal} size="sm" className="text-white" />
@@ -835,32 +874,29 @@ function GenerateScreenContent() {
 
             {activeHistoryItem && (
               <View
-                className="absolute left-0 right-0 bg-black/60 px-4 py-3"
-                style={{ bottom: showHistoryActions ? 140 : insets.bottom + 12 }}
+                className="left-0 right-0 bg-black/60 px-4 py-3 absolute"
+                style={{
+                  bottom: showHistoryActions ? 140 : insets.bottom + 12,
+                }}
               >
                 <Text className="text-sm text-white" numberOfLines={3}>
                   {activeHistoryItem.prompt || 'Prompt not saved.'}
                 </Text>
-                <Text className="mt-1 text-xs text-white/70">
-                  {formatTimestamp(activeHistoryItem.timestamp)}
-                </Text>
+                <Text className="mt-1 text-xs text-white/70">{formatTimestamp(activeHistoryItem.timestamp)}</Text>
               </View>
             )}
 
             {showHistoryActions && (
-              <Pressable
-                className="absolute inset-0 z-40 bg-black/30"
-                onPress={() => setShowHistoryActions(false)}
-              />
+              <Pressable className="inset-0 bg-black/30 absolute z-40" onPress={() => setShowHistoryActions(false)} />
             )}
-            <RNView className="absolute bottom-0 left-0 right-0 z-50">
+            <RNView className="bottom-0 left-0 right-0 absolute z-50">
               <BottomActionPanel isOpen={showHistoryActions}>
                 <VStack space="sm">
                   <Button
                     variant="outline"
                     size="lg"
                     onPress={handleSaveHistoryItem}
-                    className="h-12 w-full justify-start border-background-100 px-4"
+                    className="h-12 border-background-100 px-4 w-full justify-start"
                   >
                     <Icon as={Save} size="sm" className="mr-2 text-primary-500" />
                     <Text className="text-sm text-primary-500">Save Image</Text>
@@ -869,7 +905,7 @@ function GenerateScreenContent() {
                     variant="outline"
                     size="lg"
                     onPress={handleShareHistoryItem}
-                    className="h-12 w-full justify-start border-background-100 px-4"
+                    className="h-12 border-background-100 px-4 w-full justify-start"
                   >
                     <Icon as={Share2} size="sm" className="mr-2 text-primary-500" />
                     <Text className="text-sm text-primary-500">Share</Text>
@@ -878,7 +914,8 @@ function GenerateScreenContent() {
                     variant="outline"
                     size="lg"
                     onPress={handleCopyHistoryImage}
-                    className="h-12 w-full justify-start border-background-100 px-4"
+                    disabled={!isActiveHistoryImage}
+                    className="h-12 border-background-100 px-4 w-full justify-start"
                   >
                     <Icon as={Copy} size="sm" className="mr-2 text-primary-500" />
                     <Text className="text-sm text-primary-500">Copy Image</Text>
@@ -887,7 +924,7 @@ function GenerateScreenContent() {
                     variant="outline"
                     size="lg"
                     onPress={handleCopyHistoryPrompt}
-                    className="h-12 w-full justify-start border-background-100 px-4"
+                    className="h-12 border-background-100 px-4 w-full justify-start"
                   >
                     <Icon as={Copy} size="sm" className="mr-2 text-primary-500" />
                     <Text className="text-sm text-primary-500">Copy Generator Text</Text>

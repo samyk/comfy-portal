@@ -15,11 +15,7 @@ interface ZoomableMediaProps {
   onLongPress: () => void;
 }
 
-export const ZoomableMedia = memo(function ZoomableMedia({
-  mediaUrl,
-  onClose,
-  onLongPress,
-}: ZoomableMediaProps) {
+export const ZoomableMedia = memo(function ZoomableMedia({ mediaUrl, onClose, onLongPress }: ZoomableMediaProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const zoomableRef = useRef<ZoomableRef>(null);
@@ -37,7 +33,7 @@ export const ZoomableMedia = memo(function ZoomableMedia({
     return VIDEO_EXTENSIONS.includes(ext || '');
   }, [mediaUrl]);
 
-  const player = useVideoPlayer(isVideo ? mediaUrl : null, player => {
+  const player = useVideoPlayer(isVideo ? mediaUrl : null, (player) => {
     if (isVideo) {
       player.loop = true;
       player.play();
@@ -52,10 +48,9 @@ export const ZoomableMedia = memo(function ZoomableMedia({
         runOnJS(onClose)();
       });
 
-    const longPress = Gesture.LongPress()
-      .onEnd(() => {
-        runOnJS(onLongPress)();
-      });
+    const longPress = Gesture.LongPress().onEnd(() => {
+      runOnJS(onLongPress)();
+    });
 
     const gestures = Gesture.Exclusive(longPress, singleTap);
 
@@ -91,11 +86,7 @@ export const ZoomableMedia = memo(function ZoomableMedia({
 
   // Image: Use Zoomable for zoom handling
   return (
-    <Pressable
-      className="flex-1 bg-black"
-      onLongPress={onLongPress}
-      delayLongPress={500}
-    >
+    <Pressable className="bg-black flex-1" onLongPress={onLongPress} delayLongPress={500}>
       <Zoomable
         ref={zoomableRef}
         minScale={1}

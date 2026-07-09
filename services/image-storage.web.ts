@@ -6,18 +6,30 @@
  */
 
 import { Workflow } from '@/features/workflow/types';
-import { generateUUID } from '@/utils/uuid';
 
 interface SaveMediaOptions {
   serverId: string;
   workflowId: string;
   mediaUrl: string;
   workflow: Workflow;
+  prompt?: string;
   delete?: boolean;
 }
 
+export interface ImageCropRect {
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
 // In-memory storage for generated media on web
-const memoryStore = new Map<string, Array<{ path: string; metadata: any }>>();
+const memoryStore = new Map<string, { path: string; metadata: any }[]>();
 
 function getStoreKey(serverId: string, workflowId: string) {
   return `${serverId}:${workflowId}`;
@@ -28,6 +40,7 @@ export async function saveGeneratedMedia({
   workflowId,
   mediaUrl,
   workflow,
+  prompt,
   delete: shouldDelete,
 }: SaveMediaOptions) {
   try {
@@ -35,17 +48,20 @@ export async function saveGeneratedMedia({
 
     if (shouldDelete) {
       const items = memoryStore.get(key) || [];
-      memoryStore.set(key, items.filter((item) => item.path !== mediaUrl));
+      memoryStore.set(
+        key,
+        items.filter((item) => item.path !== mediaUrl),
+      );
       return;
     }
 
-    const uuid = generateUUID();
     const timestamp = new Date().toISOString();
 
     const metadata = {
       timestamp,
       workflow,
       originalUrl: mediaUrl,
+      ...(prompt ? { prompt } : {}),
     };
 
     const items = memoryStore.get(key) || [];
@@ -87,6 +103,91 @@ export async function loadHistoryMedia(serverId: string, workflowId: string) {
     console.error('failed to load history media:', error);
     return [];
   }
+}
+
+export async function loadHistoryMediaWithPrompt(serverId: string, workflowId: string) {
+  try {
+    const mediaItems = await getGeneratedMedia(serverId, workflowId);
+
+    return mediaItems
+      .filter((item) => item.metadata)
+      .map((item) => ({
+        url: item.path,
+        prompt: item.metadata.prompt as string | undefined,
+        timestamp: new Date(item.metadata.timestamp).getTime(),
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error('failed to load history media with prompt:', error);
+    return [];
+  }
+}
+
+export async function loadAllHistoryMediaWithPrompt() {
+  try {
+    const allItems: {
+      url: string;
+      prompt?: string;
+      timestamp: number;
+      serverId: string;
+      workflowId: string;
+    }[] = [];
+
+    for (const key of memoryStore.keys()) {
+      const [serverId, workflowId] = key.split(':');
+      const items = await loadHistoryMediaWithPrompt(serverId, workflowId);
+      allItems.push(
+        ...items.map((item) => ({
+          ...item,
+          serverId,
+          workflowId,
+        })),
+      );
+    }
+
+    return allItems.sort((a, b) => b.timestamp - a.timestamp);
+  } catch (error) {
+    console.error('failed to load all history media with prompt:', error);
+    return [];
+  }
+}
+
+export async function createStickerFromImage(imageUri: string) {
+  return {
+    path: imageUri,
+  };
+}
+
+export async function getImageDimensions(_imageUri: string): Promise<ImageDimensions> {
+  throw new Error('Image dimensions are not available on web.');
+}
+
+export async function createStickerFromFocusedImage(imageUri: string, _crop: ImageCropRect) {
+  return {
+    path: imageUri,
+  };
+}
+
+export async function createSubjectStickerFromImage(imageUri: string) {
+  return {
+    path: imageUri,
+  };
+}
+
+export async function copyImageToClipboard(_imageUri: string) {
+  throw new Error('Image clipboard is not available on web.');
+}
+
+export async function copyImageAsSticker(_imageUri: string) {
+  throw new Error('iOS stickers are not available on web.');
+}
+
+export async function copyFocusedImageAsSticker(_imageUri: string, _crop: ImageCropRect) {
+  throw new Error('iOS stickers are not available on web.');
+}
+
+export async function shareImageAsSticker(_imageUri: string) {
+  throw new Error('iOS stickers are not available on web.');
 }
 
 export async function saveWorkflowThumbnail({

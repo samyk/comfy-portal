@@ -1,11 +1,13 @@
 import { Icon } from '@/components/ui/icon';
 import { Modal, ModalBackdrop, ModalBody, ModalContent } from '@/components/ui/modal';
 import { Text } from '@/components/ui/text';
+import { copyImageAsSticker, copyImageToClipboard } from '@/services/image-storage';
+import { showToast } from '@/utils/toast';
 import { Image } from 'expo-image';
-import { ImageIcon, X } from 'lucide-react-native';
+import { Copy, ImageIcon, PlayCircle, Wand2, X } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import React, { memo, useEffect, useRef, useState } from 'react';
-import { Pressable, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -16,7 +18,6 @@ import { ZoomableMedia } from './zoomable-media';
 import { useGenerationProgress, useGenerationStatus } from '@/features/generation/context/generation-context';
 
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { PlayCircle } from 'lucide-react-native';
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm'];
 
@@ -31,29 +32,21 @@ interface ParallaxMediaProps {
 }
 
 const VideoPreview = ({ url }: { url: string }) => {
-  const player = useVideoPlayer(url, player => {
+  const player = useVideoPlayer(url, (player) => {
     player.loop = false;
     player.pause();
     player.muted = true;
   });
 
   return (
-    <VideoView
-      player={player}
-      style={{ width: '100%', height: '100%' }}
-      contentFit="contain"
-      nativeControls={false}
-    />
+    <VideoView player={player} style={{ width: '100%', height: '100%' }} contentFit="contain" nativeControls={false} />
   );
 };
 
 /**
  * A component that displays media with parallax scrolling effect and preview functionality
  */
-export const MediaPreview = memo(function ParallaxMedia({
-  workflowId,
-  serverId,
-}: ParallaxMediaProps) {
+export const MediaPreview = memo(function ParallaxMedia({ workflowId, serverId }: ParallaxMediaProps) {
   const { generatedMedia, status } = useGenerationStatus();
   const { progress } = useGenerationProgress();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -90,6 +83,35 @@ export const MediaPreview = memo(function ParallaxMedia({
     setShowActionsheet(true);
   };
 
+  const handleCopySticker = async (mediaUrl = generatedMedia[activeIndex]) => {
+    if (!mediaUrl || isVideoUrl(mediaUrl)) return;
+
+    if (Platform.OS !== 'ios') {
+      showToast.error('iOS only', 'Stickers are only available on iOS.', safeAreaInsets.top + 8);
+      return;
+    }
+
+    try {
+      await copyImageAsSticker(mediaUrl);
+      showToast.success('Sticker copied', 'Paste it in Messages to send as a sticker.', safeAreaInsets.top + 8);
+    } catch (error) {
+      console.error('Failed to copy sticker:', error);
+      showToast.error('Sticker Failed', 'Unable to create a sticker from this image.', safeAreaInsets.top + 8);
+    }
+  };
+
+  const handleCopyEntireImage = async (mediaUrl = generatedMedia[activeIndex]) => {
+    if (!mediaUrl || isVideoUrl(mediaUrl)) return;
+
+    try {
+      await copyImageToClipboard(mediaUrl);
+      showToast.success('Image copied', undefined, safeAreaInsets.top + 8);
+    } catch (error) {
+      console.error('Failed to copy image:', error);
+      showToast.error('Copy Failed', 'Unable to copy the image.', safeAreaInsets.top + 8);
+    }
+  };
+
   return (
     <View
       className="relative w-full flex-1 flex-col items-start justify-start"
@@ -111,24 +133,50 @@ export const MediaPreview = memo(function ParallaxMedia({
               <View key={`${mediaUrl}-${index}`} className="flex-1">
                 <Pressable className="flex-1" onPress={() => setIsPreviewOpen(true)}>
                   {isVideoUrl(mediaUrl) ? (
-                    <View className="flex-1 items-center justify-center bg-black">
+                    <View className="bg-black flex-1 items-center justify-center">
                       <VideoPreview url={mediaUrl} />
-                      <View className="absolute inset-0 items-center justify-center bg-black/20">
-                        <Icon as={PlayCircle} className="text-white opacity-90 h-12 w-12" />
+                      <View className="inset-0 bg-black/20 absolute items-center justify-center">
+                        <Icon as={PlayCircle} className="text-white h-12 w-12 opacity-90" />
                       </View>
                     </View>
                   ) : (
-                    <Image
-                      source={{ uri: mediaUrl }}
-                      style={{
-                        width: containerSize.width || screenWidth,
-                        height: containerSize.height || screenHeight,
-                        aspectRatio: undefined,
-                      }}
-                      contentFit="contain"
-                      contentPosition="top"
-                      cachePolicy="memory-disk"
-                    />
+                    <View className="flex-1">
+                      <Image
+                        source={{ uri: mediaUrl }}
+                        style={{
+                          width: containerSize.width || screenWidth,
+                          height: containerSize.height || screenHeight,
+                          aspectRatio: undefined,
+                        }}
+                        contentFit="contain"
+                        contentPosition="top"
+                        cachePolicy="memory-disk"
+                      />
+                      <View className="right-3 bottom-3 gap-2 absolute flex-row">
+                        {Platform.OS === 'ios' && (
+                          <Pressable
+                            accessibilityLabel="Copy image subject as sticker"
+                            onPress={(event) => {
+                              event.stopPropagation?.();
+                              handleCopySticker(mediaUrl);
+                            }}
+                            className="h-10 w-10 bg-black/55 items-center justify-center rounded-full"
+                          >
+                            <Icon as={Wand2} size="sm" className="text-white" />
+                          </Pressable>
+                        )}
+                        <Pressable
+                          accessibilityLabel="Copy entire image"
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            handleCopyEntireImage(mediaUrl);
+                          }}
+                          className="h-10 w-10 bg-black/55 items-center justify-center rounded-full"
+                        >
+                          <Icon as={Copy} size="sm" className="text-white" />
+                        </Pressable>
+                      </View>
+                    </View>
                   )}
                 </Pressable>
               </View>
@@ -137,29 +185,26 @@ export const MediaPreview = memo(function ParallaxMedia({
 
           {/* Page Indicator */}
           {generatedMedia.length > 1 && (
-            <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-2">
+            <View className="bottom-4 left-0 right-0 gap-2 absolute flex-row justify-center">
               {generatedMedia.map((_, index) => (
                 <View
                   key={index}
-                  className={`h-2 w-2 rounded-full ${index === activeIndex ? 'bg-primary-500' : 'bg-border-300'
-                    }`}
+                  className={`h-2 w-2 rounded-full ${index === activeIndex ? 'bg-primary-500' : 'bg-border-300'}`}
                 />
               ))}
             </View>
           )}
 
           {/* Status Indicators */}
-          <View className="absolute top-3 right-3 flex-row gap-2">
-            <View className="min-w-[48px] items-center justify-center rounded-full bg-black/50 px-2.5 py-1">
-              <Text className="text-center text-xs font-medium text-white">
-                {isVideoUrl(generatedMedia[activeIndex] || '')
-                  ? 'Video'
-                  : 'Image'}
+          <View className="top-3 right-3 gap-2 absolute flex-row">
+            <View className="bg-black/50 px-2.5 py-1 min-w-[48px] items-center justify-center rounded-full">
+              <Text className="text-xs font-medium text-white text-center">
+                {isVideoUrl(generatedMedia[activeIndex] || '') ? 'Video' : 'Image'}
               </Text>
             </View>
             {generatedMedia.length > 1 && (
-              <View className="min-w-[48px] items-center justify-center rounded-full bg-black/50 px-2.5 py-1">
-                <Text className="text-center text-xs font-medium text-white">
+              <View className="bg-black/50 px-2.5 py-1 min-w-[48px] items-center justify-center rounded-full">
+                <Text className="text-xs font-medium text-white text-center">
                   {activeIndex + 1}/{generatedMedia.length}
                 </Text>
               </View>
@@ -177,7 +222,7 @@ export const MediaPreview = memo(function ParallaxMedia({
           >
             <ModalBackdrop />
             <ModalContent
-              className="m-0 h-full rounded-none border-0 bg-black p-0"
+              className="m-0 bg-black p-0 h-full rounded-none border-0"
               style={{ shadowColor: 'transparent', elevation: 0 }}
               transition={{
                 type: 'timing',
@@ -185,7 +230,7 @@ export const MediaPreview = memo(function ParallaxMedia({
               }}
             >
               <ModalBody
-                className="h-full flex-1 p-0"
+                className="p-0 h-full flex-1"
                 contentContainerStyle={{
                   flex: 1,
                   alignItems: 'center',
@@ -218,18 +263,17 @@ export const MediaPreview = memo(function ParallaxMedia({
                   from={{ opacity: 1 }}
                   animate={{ opacity: 0 }}
                   transition={{ type: 'timing', duration: 300, delay: 2000 }}
-                  className="absolute bottom-16 left-0 right-0 items-center justify-center pointer-events-none"
+                  className="bottom-16 left-0 right-0 pointer-events-none absolute items-center justify-center"
                 >
                   <Text className="text-sm font-medium text-white/70">Long press to open menu</Text>
                 </MotiView>
 
                 {generatedMedia.length > 1 && (
-                  <View className="absolute bottom-8 left-0 right-0 flex-row justify-center gap-2 pointer-events-none">
+                  <View className="bottom-8 left-0 right-0 gap-2 pointer-events-none absolute flex-row justify-center">
                     {generatedMedia.map((_, index) => (
                       <View
                         key={index}
-                        className={`h-2 w-2 rounded-full ${index === activeIndex ? 'bg-white' : 'bg-white/50'
-                          }`}
+                        className={`h-2 w-2 rounded-full ${index === activeIndex ? 'bg-white' : 'bg-white/50'}`}
                       />
                     ))}
                   </View>
@@ -262,14 +306,14 @@ export const MediaPreview = memo(function ParallaxMedia({
           </Modal>
         </View>
       ) : (
-        <View className="h-full w-full items-center justify-center bg-background-0">
-          <View className="items-center gap-4 px-6">
-            <View className="rounded-full bg-background-50 p-3">
+        <View className="bg-background-0 h-full w-full items-center justify-center">
+          <View className="gap-4 px-6 items-center">
+            <View className="bg-background-50 p-3 rounded-full">
               <Icon as={ImageIcon} size="xl" className="h-10 w-10 text-typography-300" />
             </View>
-            <View className="items-center gap-1">
+            <View className="gap-1 items-center">
               <Text className="text-base font-semibold text-typography-800">No Media Yet</Text>
-              <Text className="text-center text-sm text-typography-500">
+              <Text className="text-sm text-typography-500 text-center">
                 Generate an image to preview results here.
               </Text>
               {status === 'generating' && progress.max > 0 && (

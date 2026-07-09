@@ -1,6 +1,12 @@
 import { Workflow } from '@/features/workflow/types';
 import { generateUUID } from '@/utils/uuid';
+import { createSubjectCutoutAsync } from 'comfy-subject-cutout';
+import * as Clipboard from 'expo-clipboard';
 import { Directory, File, Paths } from 'expo-file-system';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
 
 interface SaveMediaOptions {
   serverId: string;
@@ -11,6 +17,38 @@ interface SaveMediaOptions {
   delete?: boolean;
 }
 
+export interface ImageCropRect {
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'heic', 'heif'];
+const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
+  gif: 'image/gif',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+const IOS_UTI_BY_EXTENSION: Record<string, string> = {
+  gif: 'com.compuserve.gif',
+  heic: 'public.heic',
+  heif: 'public.heif',
+  jpeg: 'public.jpeg',
+  jpg: 'public.jpeg',
+  png: 'public.png',
+  webp: 'org.webmproject.webp',
+};
+
 function getGeneratedDir(serverId: string, workflowId: string) {
   return new Directory(Paths.document, 'server', serverId, 'workflows', workflowId, 'generated');
 }
@@ -19,8 +57,42 @@ function getThumbnailDir(serverId: string, workflowId: string) {
   return new Directory(Paths.document, 'server', serverId, 'workflows', workflowId, 'thumbnail');
 }
 
+function getStickerDir() {
+  return new Directory(Paths.document, 'stickers');
+}
+
+function getStickerSourceDir() {
+  return new Directory(Paths.cache, 'sticker-sources');
+}
+
 function ensureDirectory(dir: Directory) {
   dir.create({ intermediates: true, idempotent: true });
+}
+
+function getFileExtension(uri: string) {
+  return uri.split('?')[0].split('#')[0].split('.').pop()?.toLowerCase();
+}
+
+function isImageUri(uri: string) {
+  const ext = getFileExtension(uri);
+  return Boolean(ext && IMAGE_EXTENSIONS.includes(ext));
+}
+
+async function saveImageToPhotoLibrary(uri: string) {
+  if (Platform.OS === 'web' || !isImageUri(uri)) return false;
+
+  try {
+    const permission = await MediaLibrary.requestPermissionsAsync(true);
+    if (!permission.granted) {
+      return false;
+    }
+
+    await MediaLibrary.saveToLibraryAsync(uri);
+    return true;
+  } catch (error) {
+    console.warn('Failed to auto-save generated image:', error);
+    return false;
+  }
 }
 
 export async function saveGeneratedMedia({
@@ -62,6 +134,8 @@ export async function saveGeneratedMedia({
       await File.downloadFileAsync(mediaUrl, mediaFile, { idempotent: true });
     }
 
+    const savedToPhotoLibrary = await saveImageToPhotoLibrary(mediaFile.uri);
+
     const metadataFile = new File(generatedDir, `${filename}.json`);
     metadataFile.create({ intermediates: true, overwrite: true });
 
@@ -69,6 +143,7 @@ export async function saveGeneratedMedia({
       timestamp,
       workflow,
       originalUrl: mediaUrl,
+      savedToPhotoLibrary,
       ...(prompt ? { prompt } : {}),
     };
 
@@ -82,6 +157,136 @@ export async function saveGeneratedMedia({
     console.error('Failed to save/delete generated media:', error);
     throw error;
   }
+}
+
+export async function createStickerFromImage(imageUri: string) {
+  if (!isImageUri(imageUri)) {
+    throw new Error('Only image files can be used as stickers.');
+  }
+
+  const stickerDir = getStickerDir();
+  ensureDirectory(stickerDir);
+
+  const uuid = await generateUUID();
+  const timestamp = new Date().toISOString();
+  const ext = getFileExtension(imageUri) || 'png';
+  const stickerFile = new File(stickerDir, `${timestamp}-${uuid}.${ext}`);
+
+  new File(imageUri).copy(stickerFile);
+
+  return {
+    path: stickerFile.uri,
+  };
+}
+
+export async function getImageDimensions(imageUri: string): Promise<ImageDimensions> {
+  if (!isImageUri(imageUri)) {
+    throw new Error('Only image files have dimensions.');
+  }
+
+  const image = await manipulateAsync(imageUri, [], {
+    compress: 1,
+    format: SaveFormat.PNG,
+  });
+
+  return {
+    width: image.width,
+    height: image.height,
+  };
+}
+
+export async function createStickerFromFocusedImage(imageUri: string, crop: ImageCropRect) {
+  if (!isImageUri(imageUri)) {
+    throw new Error('Only image files can be used as stickers.');
+  }
+
+  const croppedImage = await manipulateAsync(
+    imageUri,
+    [
+      {
+        crop: {
+          originX: Math.max(0, Math.floor(crop.originX)),
+          originY: Math.max(0, Math.floor(crop.originY)),
+          width: Math.max(1, Math.floor(crop.width)),
+          height: Math.max(1, Math.floor(crop.height)),
+        },
+      },
+    ],
+    {
+      compress: 1,
+      format: SaveFormat.PNG,
+    },
+  );
+
+  return createStickerFromImage(croppedImage.uri);
+}
+
+async function getLocalImageForSubjectCutout(imageUri: string) {
+  if (imageUri.startsWith('file://')) {
+    return imageUri;
+  }
+
+  if (!imageUri.startsWith('http://') && !imageUri.startsWith('https://')) {
+    return imageUri;
+  }
+
+  const sourceDir = getStickerSourceDir();
+  ensureDirectory(sourceDir);
+
+  const uuid = await generateUUID();
+  const ext = getFileExtension(imageUri) || 'png';
+  const sourceFile = new File(sourceDir, `${uuid}.${ext}`);
+  await File.downloadFileAsync(imageUri, sourceFile, { idempotent: true });
+  return sourceFile.uri;
+}
+
+export async function createSubjectStickerFromImage(imageUri: string) {
+  if (!isImageUri(imageUri)) {
+    throw new Error('Only image files can be used as stickers.');
+  }
+
+  const localImageUri = await getLocalImageForSubjectCutout(imageUri);
+  const subject = await createSubjectCutoutAsync(localImageUri);
+  return createStickerFromImage(subject.uri);
+}
+
+export async function copyImageToClipboard(imageUri: string) {
+  if (!isImageUri(imageUri)) {
+    throw new Error('Only image files can be copied as images.');
+  }
+
+  const base64Image = await new File(imageUri).base64();
+  await Clipboard.setImageAsync(base64Image);
+}
+
+export async function copyImageAsSticker(imageUri: string) {
+  const sticker = await createSubjectStickerFromImage(imageUri);
+  await copyImageToClipboard(sticker.path);
+  return sticker;
+}
+
+export async function copyFocusedImageAsSticker(imageUri: string, crop: ImageCropRect) {
+  void crop;
+  const sticker = await createSubjectStickerFromImage(imageUri);
+  await copyImageToClipboard(sticker.path);
+  return sticker;
+}
+
+export async function shareImageAsSticker(imageUri: string) {
+  const sticker = await createStickerFromImage(imageUri);
+  const isShareAvailable = await Sharing.isAvailableAsync();
+
+  if (!isShareAvailable) {
+    throw new Error('Sharing is not available on this device.');
+  }
+
+  const ext = getFileExtension(sticker.path) || 'png';
+  await Sharing.shareAsync(sticker.path, {
+    mimeType: MIME_TYPES_BY_EXTENSION[ext] || 'image/png',
+    UTI: IOS_UTI_BY_EXTENSION[ext] || 'public.png',
+  });
+
+  return sticker;
 }
 
 export async function getGeneratedMedia(serverId: string, workflowId: string) {
